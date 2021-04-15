@@ -1,8 +1,11 @@
+
 use serde::{Deserialize, Serialize};
 use std::process::Stdio;
 use std::path::Path;
 use execute::Execute;
 use std::str;
+use std::fs::File;
+use std::io::{BufReader, Error, BufRead};
 
 #[derive(Debug)]
 enum Command {
@@ -80,6 +83,12 @@ enum DependencyKind {
     Normal, Development, Build
 }
 
+struct Package {
+    name: String,
+    version: String,
+    line: u32
+}
+
 fn version() {
     println!("1")
 }
@@ -93,6 +102,11 @@ fn applicable() {
 }
 
 fn run(args: &AnalyzerArgs) -> Vec<MuseResponse> {
+    let packages = match get_packages() {
+        Ok(packages) => {packages}
+        Err(_) => { panic!("Unable to parse Cargo.toml packages")}
+    };
+
     let output = execute_outdated_command(&args);
 
     if !output.1.is_empty() {
@@ -107,7 +121,42 @@ fn run(args: &AnalyzerArgs) -> Vec<MuseResponse> {
     }
 
     let response: Outdated = serde_json::from_str(str::from_utf8(&output.0).unwrap()).unwrap();
-    build_muse_response(response)
+    build_muse_response(response, packages)
+}
+
+fn get_packages() -> Result<Vec<Package>, Error> {
+    let file = File::open("Cargo.toml")?;
+    let reader = BufReader::new(file);
+
+    let mut packages: Vec<Package> = Vec::new();
+    let mut line_number: u32 = 0;
+    let mut found_deps = false;
+    let mut finished_deps = false;
+    for line in reader.lines() {
+        let the_line = line.unwrap();
+        if !found_deps && the_line.contains("[dependencies]") {
+            found_deps = true;
+        }
+        else if found_deps && !finished_deps {
+            if the_line.starts_with('[') && the_line.ends_with(']') {
+                finished_deps = true;
+            }
+            else if the_line.contains("=") {
+                let splits = the_line.split('=').collect::<Vec<&str>>();
+                if splits.len() == 2 {
+                    let package = Package {
+                        name: splits[0].trim().to_string(),
+                        version: splits[1].trim().replace("\"", "").to_string(),
+                        line: line_number
+                    };
+                    packages.push(package);
+                }
+            }
+        }
+        line_number+=1;
+    }
+
+    Ok(packages)
 }
 
 fn execute_outdated_command(_args: &&AnalyzerArgs) -> (Vec<u8>, Vec<u8>) {
@@ -128,18 +177,25 @@ fn execute_outdated_command(_args: &&AnalyzerArgs) -> (Vec<u8>, Vec<u8>) {
     }
 }
 
-fn build_muse_response(outdated: Outdated) -> Vec<MuseResponse> {
+fn build_muse_response(outdated: Outdated, packages: Vec<Package>) -> Vec<MuseResponse> {
 
     let response = outdated.dependencies.iter().map(|dependency| {
         MuseResponse {
             type_of: "Out of date".to_string(),
             message: build_muse_message(dependency),
             file: "Cargo.toml".to_string(),
-            line: 0
+            line: find_line_number(dependency, &packages)
         }
     }).collect();
 
     response
+}
+
+fn find_line_number(dependency: &Dependency, packages: &Vec<Package>) -> u32 {
+    let res = packages.into_iter()
+        .filter(|p| { dependency.name == p.name && dependency.project == p.version })
+        .map(|p| p.line).last();
+    res.unwrap_or(0)
 }
 
 fn build_muse_message(dependency: &Dependency) -> String {
@@ -224,5 +280,19 @@ mod test {
 
         assert_eq!(actual.crate_name, "muse-rust-analyzer");
         assert_eq!(actual.dependencies.len(), 2);
+    }
+
+    #[test]
+    fn can_get_packages() {
+        let response = get_packages();
+        let packages = response.unwrap();
+
+        assert_eq!(packages.len(), 2);
+        assert_eq!(packages[0].name, "serde_json");
+        assert_eq!(packages[0].version, "1.0");
+        assert_eq!(packages[0].line, 10);
+        assert_eq!(packages[1].name, "execute");
+        assert_eq!(packages[1].version, "0.2.8");
+        assert_eq!(packages[1].line, 11);
     }
 }
