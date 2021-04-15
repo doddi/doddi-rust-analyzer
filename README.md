@@ -22,6 +22,7 @@ The shell script above, installs Rust binary and the [outdated](https://github.c
 
 After running an analyses, any components that can be updated will be shown as a card:
 
-![screenshot](https://ibb.co/LnPsgB5)
+
+<a href="https://ibb.co/LnPsgB5"><img src="https://i.ibb.co/r4tXpqs/Screenshot-2021-04-15-at-15-23-22.png" alt="Screenshot-2021-04-15-at-15-23-22" border="0"></a><br />
 
 **Note**: that this analyzer needs to be built as a linux image so may need cross-compiling
